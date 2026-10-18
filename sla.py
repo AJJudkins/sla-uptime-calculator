@@ -1,6 +1,7 @@
 """SLA uptime calculator: uptime %, allowed downtime per tier, error-budget burn."""
 import argparse
 import csv
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -16,13 +17,19 @@ def load_incidents(path):
     """CSV columns: id,start,end,description (ISO timestamps)."""
     incidents = []
     with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            incidents.append({
-                "id": row["id"],
-                "start": datetime.fromisoformat(row["start"]),
-                "end": datetime.fromisoformat(row["end"]),
-                "description": row.get("description", ""),
-            })
+        reader = csv.DictReader(f)
+        missing = {"id", "start", "end"} - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"CSV is missing columns: {sorted(missing)}")
+        for n, row in enumerate(reader, 2):
+            try:
+                start, end = datetime.fromisoformat(row["start"]), datetime.fromisoformat(row["end"])
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"line {n}: bad timestamp ({e})") from None
+            if end < start:
+                raise ValueError(f"line {n}: incident {row['id']} ends before it starts")
+            incidents.append({"id": row["id"], "start": start, "end": end,
+                              "description": row.get("description", "")})
     return incidents
 
 
@@ -77,9 +84,18 @@ def main(argv=None):
     ap.add_argument("--start", required=True, help="window start, e.g. 2026-01-01")
     ap.add_argument("--end", required=True, help="window end, e.g. 2026-01-31")
     ap.add_argument("--sla", type=float, default=99.9)
+    ap.add_argument("--fail-on-breach", action="store_true", help="exit 1 if the SLA is breached")
     args = ap.parse_args(argv)
-    ws, we = datetime.fromisoformat(args.start), datetime.fromisoformat(args.end)
-    r = report(load_incidents(args.incidents), ws, we, args.sla)
+    try:
+        if not 0 <= args.sla < 100:
+            raise ValueError("--sla must be at least 0 and below 100")
+        ws, we = datetime.fromisoformat(args.start), datetime.fromisoformat(args.end)
+        if we <= ws:
+            raise ValueError("--end must be after --start")
+        r = report(load_incidents(args.incidents), ws, we, args.sla)
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     print(f"Window: {args.start} to {args.end} ({r['period_minutes']} min)")
     print(f"Downtime: {r['downtime_minutes']} min | Uptime: {r['uptime_percent']}%")
     print(f"SLA target {r['sla_percent']}% -> error budget {r['error_budget_minutes']} min, "
@@ -88,7 +104,8 @@ def main(argv=None):
     print("\nAllowed downtime per tier for this window:")
     for name, mins in tier_table(r["period_minutes"]).items():
         print(f"  {name:<7} {mins:>8} min")
+    return 1 if (args.fail_on_breach and not r["sla_met"]) else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

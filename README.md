@@ -1,5 +1,7 @@
 # SLA Uptime Calculator
 
+[![CI](https://github.com/AJJudkins/sla-uptime-calculator/actions/workflows/ci.yml/badge.svg)](https://github.com/AJJudkins/sla-uptime-calculator/actions/workflows/ci.yml)
+
 Service-level agreements promise a percentage of uptime, which translates into a small amount of allowed downtime. This tool computes uptime for a period from an incident log, shows allowed downtime for common SLA tiers, and reports how much of the error budget has burned.
 
 > Portfolio project. Uses simulated/sample data only.
@@ -67,6 +69,18 @@ pytest
 - Treats every incident as full downtime; no partial degradation or weighting.
 - One window at a time, with no rolling windows or burn-rate alerting.
 - Sample data uses a 99.9% target over 30 days, which is deliberately breached to show the output.
+
+## Hardening notes
+- Input is validated: required CSV columns, ISO timestamps, incidents that end before they start, `--end` after `--start`, and `--sla` in [0, 100). Problems exit with code 2.
+- `--fail-on-breach` makes the exit code 1 when the SLA is breached, for CI or scheduled checks.
+- Console script after `pip install -e .`: `sla-uptime incidents.csv --start 2026-01-01 --end 2026-01-31`.
+
+## Security and testing status
+
+- **Safety:** offline and read-only: it reads one CSV and prints numbers; nothing is written or sent anywhere.
+- **Tested:** uptime and budget math, overlapping-incident merging, input validation and exit codes on sample CSVs.
+- **Not tested:** real monitoring exports, time zones (timestamps are treated as naive local times), and maintenance-window exclusions (not supported).
+- See [SECURITY.md](SECURITY.md).
 
 ## License
 
